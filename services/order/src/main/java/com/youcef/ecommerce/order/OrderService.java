@@ -3,12 +3,18 @@ package com.youcef.ecommerce.order;
 import com.youcef.ecommerce.customer.CustomerClient;
 import com.youcef.ecommerce.customer.CustomerResponse;
 import com.youcef.ecommerce.exceptions.BusinessException;
+import com.youcef.ecommerce.kafka.OrderConfirmation;
+import com.youcef.ecommerce.kafka.OrderProducer;
 import com.youcef.ecommerce.orderLine.OrderLineRequest;
 import com.youcef.ecommerce.orderLine.OrderLineService;
 import com.youcef.ecommerce.product.ProductClient;
 import com.youcef.ecommerce.product.PurchaseRequest;
+import com.youcef.ecommerce.product.PurchaseResponse;
+import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+
+import java.util.List;
 
 @Service
 @RequiredArgsConstructor
@@ -19,14 +25,15 @@ public class OrderService {
     private final CustomerClient customerClient;
     private final ProductClient productClient;
     private final OrderLineService orderLineService;
+    private final OrderProducer orderProducer;
 
     public Integer createOrder(OrderRequest orderRequest) {
         // Check the customer -> OpenFeign
-        CustomerResponse customer = this.customerClient.findCustomerById(orderRequest.customerId())
+        CustomerResponse customer = customerClient.findCustomerById(orderRequest.customerId())
                 .orElseThrow(() -> new BusinessException("Cannot find customer with id " + orderRequest.customerId()));
 
         // Purchase the products -> product microservice (Instead of OpenFeign, we'll use RestTemplate)
-        this.productClient.purchaseProducts(orderRequest.products());
+        List<PurchaseResponse> purchasedProducts = productClient.purchaseProducts(orderRequest.products());
 
         // Persist the order
         Order order = orderRepository.save(orderMapper.toOrder(orderRequest));
@@ -45,6 +52,27 @@ public class OrderService {
 
         // TODO Start the payment process
 
-        // TODO Send the order confirmation -> notification microservice (kafka)
+        // Send the order confirmation -> notification microservice (kafka)
+        orderProducer.sendOrderConfirmation(
+                new OrderConfirmation(
+                        orderRequest.reference(),
+                        orderRequest.amount(),
+                        orderRequest.paymentMethod(),
+                        customer,
+                        purchasedProducts
+                )
+        );
+
+        return order.getId();
+    }
+
+    public List<OrderResponse> findAll() {
+        return orderRepository.findAll().stream().map(orderMapper::toOrderResponse).toList();
+    }
+
+    public OrderResponse getOrderById(Integer orderId) {
+        return orderRepository.findById(orderId).map(orderMapper::toOrderResponse).orElseThrow(
+                () -> new EntityNotFoundException(String.format("Order with id %d not found", orderId))
+        );
     }
 }
