@@ -7,6 +7,8 @@ import com.youcef.ecommerce.kafka.OrderConfirmation;
 import com.youcef.ecommerce.kafka.OrderProducer;
 import com.youcef.ecommerce.orderLine.OrderLineRequest;
 import com.youcef.ecommerce.orderLine.OrderLineService;
+import com.youcef.ecommerce.payment.PaymentClient;
+import com.youcef.ecommerce.payment.PaymentRequest;
 import com.youcef.ecommerce.product.ProductClient;
 import com.youcef.ecommerce.product.PurchaseRequest;
 import com.youcef.ecommerce.product.PurchaseResponse;
@@ -26,6 +28,7 @@ public class OrderService {
     private final ProductClient productClient;
     private final OrderLineService orderLineService;
     private final OrderProducer orderProducer;
+    private final PaymentClient paymentClient;
 
     public Integer createOrder(OrderRequest orderRequest) {
         // Check the customer -> OpenFeign
@@ -50,7 +53,16 @@ public class OrderService {
             );
         }
 
-        // TODO Start the payment process
+        // Start the payment process
+        paymentClient.requestOrderPayment(
+                new PaymentRequest(
+                        orderRequest.amount(),
+                        orderRequest.paymentMethod(),
+                        order.getId(),
+                        orderRequest.reference(),
+                        customer
+                )
+        );
 
         // Send the order confirmation -> notification microservice (kafka)
         orderProducer.sendOrderConfirmation(
